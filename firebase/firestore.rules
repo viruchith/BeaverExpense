@@ -1,0 +1,193 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(ownerId) {
+      return isSignedIn() && ownerId == request.auth.uid;
+    }
+
+    function validText(value, min, max) {
+      return value is string && value.size() >= min && value.size() <= max;
+    }
+
+    function validIsoDate(value) {
+      return validText(value, 10, 10) && value.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function validIsoTimestamp(value) {
+      return validText(value, 20, 40)
+        && value.matches('^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$');
+    }
+
+    function validPaymentStatus(value) {
+      return value == 'paid' || value == 'pending' || value == 'partial';
+    }
+
+    function validPaymentMethod(value) {
+      return value == 'upi'
+        || value == 'cash'
+        || value == 'bank_transfer'
+        || value == 'cheque'
+        || value == 'card'
+        || value == 'other';
+    }
+
+    function validCategoryKind(value) {
+      return value == 'material' || value == 'labour';
+    }
+
+    function validReceipts(data) {
+      return !data.keys().hasAny(['receipts'])
+        || (
+          data.receipts is list
+          && data.receipts.size() <= 20
+          && (data.receipts.size() == 0 || data.receipts[0] is map)
+        );
+    }
+
+    function validOwnerData(data) {
+      return validText(data.ownerId, 1, 128) && isOwner(data.ownerId);
+    }
+
+    function immutableProtectedFields(existing) {
+      return request.resource.data.ownerId == existing.ownerId
+        && request.resource.data.createdAt == existing.createdAt;
+    }
+
+    function validSite(data) {
+      return data.keys().hasAll(['id', 'name', 'location', 'budget', 'createdAt', 'ownerId'])
+        && data.keys().hasOnly(['id', 'name', 'location', 'budget', 'createdAt', 'ownerId'])
+        && validText(data.id, 1, 128)
+        && validText(data.name, 2, 80)
+        && validText(data.location, 2, 120)
+        && data.budget is number
+        && data.budget >= 0
+        && data.budget <= 1000000000
+        && validIsoTimestamp(data.createdAt)
+        && validOwnerData(data);
+    }
+
+    function immutableSiteOwnerFields(existing) {
+      return request.resource.data.ownerId == existing.ownerId
+        && request.resource.data.createdAt == existing.createdAt
+        && request.resource.data.id == existing.id;
+    }
+
+    function validCategory(data) {
+      return data.keys().hasAll(['id', 'name', 'kind', 'subcategories', 'createdAt', 'ownerId'])
+        && data.keys().hasOnly(['id', 'name', 'kind', 'subcategories', 'createdAt', 'ownerId'])
+        && validText(data.id, 1, 128)
+        && validText(data.name, 2, 60)
+        && validCategoryKind(data.kind)
+        && data.subcategories is list
+        && data.subcategories.size() <= 200
+        && validIsoTimestamp(data.createdAt)
+        && validOwnerData(data);
+    }
+
+    function validExpense(data) {
+      return data.keys().hasAll([
+          'siteId',
+          'categoryId',
+          'categoryName',
+          'categoryKind',
+          'subcategory',
+          'description',
+          'paymentMethod',
+          'notes',
+          'createdAt',
+          'ownerId'
+        ])
+        && data.keys().hasOnly([
+          'date',
+          'siteId',
+          'categoryId',
+          'categoryName',
+          'categoryKind',
+          'subcategory',
+          'description',
+          'unit',
+          'unitPrice',
+          'totalCost',
+          'vendorOrContractorName',
+          'gstApplicable',
+          'gstPercent',
+          'gstAmount',
+          'paymentStatus',
+          'paymentMethod',
+          'notes',
+          'receipts',
+          'createdAt',
+          'ownerId'
+        ])
+        && !data.keys().hasAny(['id', 'quantity', 'imageUrl'])
+        && validIsoDate(data.date)
+        && validText(data.siteId, 1, 128)
+        && validText(data.categoryId, 1, 128)
+        && validText(data.categoryName, 1, 60)
+        && validCategoryKind(data.categoryKind)
+        && validText(data.subcategory, 1, 80)
+        && validText(data.description, 0, 200)
+        && validText(data.unit, 0, 40)
+        && data.unitPrice is number
+        && data.unitPrice >= 0
+        && data.unitPrice <= 1000000000
+        && data.totalCost is number
+        && data.totalCost >= 0
+        && data.totalCost <= 1000000000
+        && validText(data.vendorOrContractorName, 0, 120)
+        && data.gstApplicable is bool
+        && data.gstPercent is number
+        && data.gstPercent >= 0
+        && data.gstPercent <= 28
+        && data.gstAmount is number
+        && data.gstAmount >= 0
+        && (data.gstApplicable || data.gstAmount == 0)
+        && validPaymentStatus(data.paymentStatus)
+        && validPaymentMethod(data.paymentMethod)
+        && validText(data.notes, 0, 2000)
+        && validIsoTimestamp(data.createdAt)
+        && validOwnerData(data)
+        && validReceipts(data);
+    }
+
+    match /sites/{siteId} {
+      allow create: if validSite(request.resource.data)
+        && request.resource.data.id == siteId;
+
+      allow read: if isOwner(resource.data.ownerId);
+
+      allow delete: if isOwner(resource.data.ownerId);
+
+      allow update: if isOwner(resource.data.ownerId)
+        && validSite(request.resource.data)
+        && request.resource.data.id == siteId
+        && immutableSiteOwnerFields(resource.data);
+    }
+
+    match /categories/{categoryId} {
+      allow create: if validCategory(request.resource.data)
+        && request.resource.data.id == categoryId;
+
+      allow read, delete: if isOwner(resource.data.ownerId);
+
+      allow update: if isOwner(resource.data.ownerId)
+        && validCategory(request.resource.data)
+        && request.resource.data.id == categoryId
+        && immutableProtectedFields(resource.data);
+    }
+
+    match /expenses/{expenseId} {
+      allow create: if validExpense(request.resource.data);
+
+      allow read, delete: if isOwner(resource.data.ownerId);
+
+      allow update: if isOwner(resource.data.ownerId)
+        && validExpense(request.resource.data)
+        && immutableProtectedFields(resource.data);
+    }
+  }
+}

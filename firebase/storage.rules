@@ -1,0 +1,41 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnerPath(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function validReceiptName(fileName) {
+      return fileName.matches('(?i).+\\.(jpg|jpeg|png|gif|webp|pdf|csv|xls|xlsx|doc|docx)$');
+    }
+
+    function validReceiptUpload(fileName) {
+      return request.resource != null
+        && request.resource.size <= 10 * 1024 * 1024
+        && validReceiptName(fileName)
+        && (
+          request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif)')
+          || request.resource.contentType == 'application/pdf'
+          || request.resource.contentType == 'text/csv'
+          || request.resource.contentType == 'application/msword'
+          || request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          || request.resource.contentType == 'application/vnd.ms-excel'
+          || request.resource.contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          || request.resource.contentType == 'application/octet-stream'
+        );
+    }
+
+    match /expense-receipts/{uid}/{fileName} {
+      allow read, delete: if isOwnerPath(uid);
+      allow create, update: if isOwnerPath(uid) && validReceiptUpload(fileName);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
