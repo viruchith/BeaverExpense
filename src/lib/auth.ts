@@ -3,6 +3,7 @@ import {
   getAuth,
   getRedirectResult,
   onAuthStateChanged,
+  signInWithPopup,
   signInWithRedirect,
   signOut,
   type User,
@@ -55,7 +56,21 @@ export const loginWithGoogle = async (): Promise<void> => {
 
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ prompt: 'select_account' })
-  // Redirect flow avoids popup lifecycle issues in stricter browser COOP policies.
+  try {
+    await signInWithPopup(auth, provider)
+    return
+  } catch (error) {
+    const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''
+    const shouldFallbackToRedirect =
+      code === 'auth/popup-blocked'
+      || code === 'auth/popup-closed-by-user'
+      || code === 'auth/cancelled-popup-request'
+
+    if (!shouldFallbackToRedirect) {
+      throw error
+    }
+  }
+
   await signInWithRedirect(auth, provider)
 }
 
